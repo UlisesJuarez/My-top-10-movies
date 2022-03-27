@@ -5,6 +5,14 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
 import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+MOVIE_DB_SEARCH_URL=os.getenv("MOVIE_DB_SEARCH_URL")
+MOVIE_DB_API_KEY=os.getenv("MOVIE_DB_API_KEY")
+MOVIE_DB_INFO_URL=os.getenv("MOVIE_DB_INFO_URL")
+MOVIE_DB_IMAGE_URL=os.getenv("MOVIE_DB_IMAGE_URL")
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
@@ -29,6 +37,10 @@ class editForm(FlaskForm):
     rating=StringField("Your rating out of 10 e.g 8.6",validators=[DataRequired()])
     review=StringField("Your review",validators=[DataRequired()])
     submit=SubmitField("Done")
+
+class addMovie(FlaskForm):
+    title=StringField("Movie title", validators=[DataRequired()])
+    submit=SubmitField("Add movie")
 # db.create_all()
 
 ############# AÑADIENDO UN NUEVO REGISTRO#######################
@@ -47,8 +59,12 @@ class editForm(FlaskForm):
 
 @app.route("/")
 def home():
-    all_movies=Movie.query.all()
-    return render_template("index.html",movies=all_movies)
+    all_movies = Movie.query.order_by(Movie.rating).all()
+    
+    for i in range(len(all_movies)):
+        all_movies[i].ranking = len(all_movies) - i
+    db.session.commit()
+    return render_template("index.html", movies=all_movies)
 
 @app.route("/update",methods=["GET","POST"])
 def update():
@@ -72,6 +88,37 @@ def delete():
     db.session.commit()
 
     return redirect(url_for("home"))
+
+@app.route("/add",methods=["GET","POST"])
+def add():
+    form=addMovie()
+    if form.validate_on_submit():
+        movie_title = form.title.data
+        response = requests.get(f"{MOVIE_DB_SEARCH_URL}api_key={MOVIE_DB_API_KEY}&query={movie_title}")
+        data = response.json()["results"]
+        return render_template("select.html", options=data)
+    return render_template("add.html", form=form)
+
+@app.route("/select_movie",methods=["GET","POST"])
+def select_movie():
+    movie_id=request.args.get("id")
+    if movie_id:
+        movie_api_url=f"{MOVIE_DB_INFO_URL}/{movie_id}"
+        response=requests.get(f"{movie_api_url}?api_key={MOVIE_DB_API_KEY}")
+        data=response.json()
+
+        new_movie=Movie(
+            title=data["title"],
+            year=data["release_date"].split("-")[0],
+            img_url=f"{MOVIE_DB_IMAGE_URL}{data['poster_path']}",
+            description=data["overview"]
+        )
+
+        db.session.add(new_movie)
+        db.session.commit()
+
+        obj = db.session.query(Movie).order_by(Movie.id.desc()).first()
+        return redirect(url_for("update",id=obj.id))
 
 if __name__ == '__main__':
     app.run(debug=True)
